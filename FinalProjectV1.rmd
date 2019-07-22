@@ -1,0 +1,1680 @@
+---
+title: "Final Project: Suicide Rate of US States: Why Are They So Different?"
+author: "Mikhail Groysman"
+date: "December 3, 2018"
+output:
+  bookdown::html_document2:
+    theme: cerulean
+    toc: true
+    toc_depth: 5
+    code_folding: hide
+bibliography: mycitations.bib
+link-citations: yes    
+---
+
+#Motivation
+
+A few days ago, CDC released mortality data for 2017. Life expectancy has dropped for three years in a row. One of the main causes is an increase in suicide rates. Suicide keeps increasing every year for the past 2 decades and it is hard to pinpoint the exact reasons. One of the main paradoxes is a big difference in suicide rates across the country. The suicide rate for 2017 varies from 6.6 in DC to 28.9 in Montana, which is almost 4.5 times greater. Please note that the rate is age adjusted, so age distribution should not play the role. Why would a person in Montana be 4.5 times more likely to commit suicide than one in DC? If we could answer the following question, there is a greater possibility to reduce suicide rates and prevent such tragedies across our country.
+To illustrate that suicide is not remote and could only happen to someone unstable and weak, I would like to reference a tragedy that took place while I was working on the project: Top US Navy Admiral on active duty committed suicide[@cbs] only 58 years old.
+
+#Desired Outcome
+
+At the end of this project, I expect to come with a list of variables responsible for varying suicide rates across of the states. As mentioned above, I believe that understanding factors behind the variance will help us address the ever-worsening problem of suicide across the country. To come up with answers, I will try to apply both supervised and unsupervised methods, but a primary final goal is to come with a supervised model. Final measure to evaluate our model will be Adjusted R squire.
+
+To cluster states would also be interesting since we can see whether geography plays a role.
+
+
+#Current Knowledge on the Subject
+
+We know that gender, age, mental health, substance abuse, viability of guns, and ethnicity play a major role in suicide rates. Other possible factors include but are not limited to altitude, population density, rural status, and specific occupations.
+
+
+#Data Sources
+
+I researched multiple sources and none of them have any raw, detailed data because suicide is a sensitive topic for families; therefore, the government protects the families' privacy and does not provide individual data for each case; even grouped data is often masked.  This is one of the limitations I had to deal with. It was disappointing not to have all the details, but I understand that in the real world, data is not always easily and readily available.
+
+After reviewing multiple sources of potential data, I have chosen two that seem to give me the most insight on the topic:
+
+1) CDC WONDER, Detailed Mortality. The Mortality Database maintained by CDC[@cdc].
+2) SAMHSA 2016-2017 State Prevalence Estimates. State level data on drug use, mental illness, and suicide attempts[@samhsa].
+
+I have also pulled an additional Wikipedia source for comparison study:
+
+3) Wikipedia. Table: Suicides per 100,000 people in 2016 (age standardized). WHO[@wiki].
+
+
+
+```{r, message=FALSE}
+
+library(readr)
+
+library(stringr)
+
+library(dplyr)
+
+library(tidyr) 
+
+library(car) 
+
+library(ggplot2)
+
+library(usmap)
+
+library(readxl)
+
+library(ggthemes) 
+
+library(XML)
+
+library(RCurl)
+
+library(ggpubr)
+
+library(knitr)
+
+library(kableExtra)
+
+library(factoextra)
+
+library(NbClust)
+
+```
+
+
+#Tidying my data
+
+##CDC Wonder, Underlying Cause of Death, 1999-2017
+
+This is probably as good as it gets when it comes to suicide statistics. It does not have individual records and results with values under 11 are masked (fewer than 11 deaths). However, I am not aware of better alternatives to pull suicide data. From what I have seen, CDC is the main source of data for suicide reporting.
+
+Please note that CDC Wonder does have API; however, it does not allow to pull state level data from API.
+
+I will pull multiple data requests from the system. I have tried to create my own master data file in one pull; however, it did not work for the following reasons:
+
+1.	If data from 2017 is used, it would have a lot of masked results. Expanding the time frame to other years, an issue of data not being up-to data, or current, rises.
+
+2.	Not enough fields can be pulled out by Wonder Query, which were needed for the project. The query only allows you to pull 6 categorical variables, while the prospected goal was all 8 of them.
+
+
+### 2017 Suicide Data by State
+
+The first query was Suicide Data by state for year 2017. Data was not limited in any way except for the year (2017) and cause of death (suicide).
+
+```{r, results='hide',warning=FALSE}
+
+state2017<-read.table("C:/Final Project/Underlying Cause of Death, 2017 Suicide State All Race All Ages.txt", header =TRUE, sep = "\t")
+
+state2017$state<-state2017$State
+
+state2017$AARate<-state2017$Age.Adjusted.Rate
+
+arrange(state2017, AARate)
+
+state2017$group1<-"US States"
+
+par(ps = 10, cex = 1, cex.main = 1)
+
+boxplot(state2017$AARate)
+
+title(main="Plot 1. Boxplot. 2017 Suicide Age Adjusted Rate per 100,000 people by State")
+
+ggplot(state2017, aes(x=group1, y=AARate))+geom_violin()+ggtitle("Plot 2. Violin Plot. 2017 Suicide Age Adjusted Rate per 100,000 by State")+theme(plot.title = element_text(size=12))
+
+plot_usmap(data = state2017, values = "AARate", theme = theme_map(), labels = TRUE, label_color = "white", lines = "red")+ 
+  labs(title = "Plot 3. 2017 Suicide Age Adjusted Rate per 100,000 by State")
+
+
+```
+
+Montana has the highest rate, DC has the lowest. Montana seems to be an outlier.
+
+
+### 2017 Suicide Data by State, Gender, Age 15+ Only (To get closer to SAMHA's age of 18+)
+
+The second query used was 2017 Suicide Data comparing state and gender. Data was limited to one year (2017), cause of death (suicide), and age (15+). Please note that we encountered unreliable data according to CDC. The data is not big enough to be considered reliable for females in DC and Delaware. For simplicity we will use the actual rate for these states. The number we use here is not for our final analysis, so we can get away with some "cheating". If we really feel that including these 2 states will significantly skew our data (I do not feel that way), then we have 2 solutions to the problem:  one is to drop these 2 states from our analysis, or pull a few more years of data, instead of using just 2017.
+
+```{r, results='hide',warning=FALSE}
+
+state2017GA<-read.table("C:/Final Project/Underlying Cause of Death, 2017Suicide State Gender 15+.txt", header =TRUE, sep = "\t")
+
+state2017GA$state<-state2017GA$State
+
+state2017GA$AARate<-as.numeric(as.character(state2017GA$Age.Adjusted.Rate))
+
+arrange(state2017GA, AARate)
+
+state2017GA$group1<-"US States"
+
+state2017M<-filter(state2017GA, Gender=='Male')
+
+arrange(state2017M, AARate)
+
+par(ps = 10, cex = 1, cex.main = 1)
+
+boxplot(state2017M$AARate)
+
+title(main="Plot 4. Boxplot. 2017 Suicide Age Adjusted Rate per 100,000 by State - Male, Age 15+")
+
+ggplot(state2017M, aes(x=group1, y=AARate))+geom_violin()+ggtitle("Plot 5. Violin plot. 2017 Suicide Age Adjusted Rate per 100,000 by State - Male, Age 15+")+theme(plot.title = element_text(size=11))
+
+plot_usmap(data = state2017M, values = "AARate", theme = theme_map(), labels = TRUE, label_color = "white", lines = "red")+ 
+  labs(title = "Plot 6. 2017 Suicide Age Adjusted Rate per 100,000 by State - Male, Age 15+")
+
+state2017F<-filter(state2017GA, Gender=='Female')
+
+state2017F$AARate1<-(state2017F$Age.Adjusted.Rate.Lower.95..Confidence.Interval+state2017F$Age.Adjusted.Rate.Upper.95..Confidence.Interval)/2
+
+arrange(state2017F, AARate1)
+
+par(ps = 10, cex = 1, cex.main = 1)
+
+boxplot(state2017F$AARate1)
+
+title(main="Plot 7. Boxplot. 2017 Suicide Age Adjusted Rate per 100,000 by State - Female, Age 15+")
+
+ggplot(state2017F, aes(x=group1, y=AARate1))+geom_violin()+ggtitle("Plot 8. Violin plot. 2017 Suicide Age Adjusted Rate per 100,000 by State - Female, Age 15+")+theme(plot.title = element_text(size=10))
+
+plot_usmap(data = state2017F, values = "AARate1", theme = theme_map(), labels = TRUE, label_color = "white", lines = "red")+ 
+  labs(title = "Plot 9. 2017 Suicide Age Adjusted Rate per 100,000 by State - Female, Age 15+")
+
+```
+
+For male, Montana has the highest rate, DC has the lowest again as well. Montana, Wyoming, and Alaska seem to be outliers.
+
+For females, Delaware has the lowest rate, but data is unreliable. If we only use reliable data, then NY could be proud: tt has the lowest rate based on reliable data. Montana, on the other hand, has the highest rate. 
+
+### 2015-2017 Suicide Data by State, Gender, Ethnicity, Metro Status Age 15+ Only (To get closer to SAMHA's age of 18+)
+
+The third query used was 2015-2017 Suicide Data by state, gender, ethnicity, and metro residence. Data was limited to 3 years (2015-2017), cause of death (suicide), and age (15+). I have pulled 3 years of data to smooth it and to avoid unreliability label. I have still got some. We got a lot of detailed information from the data since it includes multiple aspects like gender, residency status, and ethnicity; therefore, it brings us one step closer to answering our question.
+
+```{r, results='hide',warning=FALSE}
+
+state15_17<-read.table("C:/Final Project/Underlying Cause of Death, 2015-2017 Suicide State Ethnicity Gender Metro 15+.txt", header =TRUE, sep = "\t")
+
+state15_17$state<-state15_17$State
+
+state15_17$pop<-as.numeric(as.character(state15_17$Population))
+
+state15_17$relFlag<-if (state15_17$Age.Adjusted.Rate=='Unreliable') {'U'} else {'R'}
+
+state15_17$AARate<-(as.numeric(as.character(state15_17$Age.Adjusted.Rate.Lower.95..Confidence.Interval))+as.numeric(as.character(state15_17$Age.Adjusted.Rate.Upper.95..Confidence.Interval)))/2
+
+arrange(state15_17, AARate)
+
+state15_17$group1<-"US States"
+
+state15_17C<-filter(state15_17, state=='Colorado')%>%select(state,Gender,X2013.Urbanization,AARate,Race,Hispanic.Origin,pop,relFlag)
+
+state15_17M<-filter(state15_17, state=='Minnesota')%>%select(state,Gender,X2013.Urbanization,AARate,Race,Hispanic.Origin,pop,relFlag)
+
+state15_17WM<-filter(state15_17, Race=='White'&Gender=='Male'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17WM$prod<-state15_17WM$AARate*state15_17WM$pop
+
+state15_17WM1<-select(state15_17WM,prod,pop,state)
+
+state15_17WM1<-aggregate(.~state, data=state15_17WM1, FUN=sum)
+
+state15_17WM1$AARate<-state15_17WM1$prod/state15_17WM1$pop
+
+state15_17WF<-filter(state15_17, Race=='White'&Gender=='Female'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17WF$prod<-state15_17WF$AARate*state15_17WF$pop
+
+state15_17WF1<-select(state15_17WF,prod,pop,state)
+
+state15_17WF1<-aggregate(.~state, data=state15_17WF1, FUN=sum)
+
+state15_17WF1$AARate<-state15_17WF1$prod/state15_17WF1$pop
+
+state15_17BM<-filter(state15_17, Race=='Black or African American'&Gender=='Male'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17BM$prod<-state15_17BM$AARate*state15_17BM$pop
+
+state15_17BM1<-select(state15_17BM,prod,pop,state)
+
+state15_17BM1<-aggregate(.~state, data=state15_17BM1, FUN=sum)
+
+state15_17BM1$AARate<-state15_17BM1$prod/state15_17BM1$pop
+
+state15_17BF<-filter(state15_17, Race=='Black or African American'&Gender=='Female'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17BF$prod<-state15_17BF$AARate*state15_17BF$pop
+
+state15_17BF1<-select(state15_17BF,prod,pop,state)
+
+state15_17BF1<-aggregate(.~state, data=state15_17BF1, FUN=sum)
+
+state15_17BF1$AARate<-state15_17BF1$prod/state15_17BF1$pop
+
+state15_17HM<-filter(state15_17, Gender=='Male'&Hispanic.Origin=='Hispanic or Latino')
+
+state15_17HM$prod<-state15_17HM$AARate*state15_17HM$pop
+
+state15_17HM1<-select(state15_17HM,prod,pop,state)
+
+state15_17HM1<-aggregate(.~state, data=state15_17HM1, FUN=sum)
+
+state15_17HM1$AARate<-state15_17HM1$prod/state15_17HM1$pop
+
+state15_17HF<-filter(state15_17, Race=='Black or African American'&Gender=='Female'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17HF$prod<-state15_17HF$AARate*state15_17HF$pop
+
+state15_17HF1<-select(state15_17HF,prod,pop,state)
+
+state15_17HF1<-aggregate(.~state, data=state15_17HF1, FUN=sum)
+
+state15_17HF1$AARate<-state15_17HF1$prod/state15_17HF1$pop
+
+state15_17%>%select(state,Race,Hispanic.Origin,Gender,X2013.Urbanization,Population, AARate)%>%filter(state=='Montana'|state=='District of Columbia')
+
+
+```
+
+### 2015-2017 Mortality  Data by State, Gender, Ethnicity, Metro Status Age 15+ Only (To get closer to SAMHA's age of 18+) - Drug Induced Indicator
+
+The third query I have pulled was 2015-2017 Mortality Data by state, gender, ethnicity, metro residence, and drug induced indicator. Data was limited to 3 years (2015-2017) and age (15+). I have pulled 3 years of data to smooth it and to avoid unreliability label.  
+
+```{r, results='hide',warning=FALSE,}
+
+state15_17DI<-read.table("C:/Final Project/Underlying Cause of Death,  2015-2017 Drug Induced.txt", header =TRUE, sep = "\t")
+
+state15_17DI$state<-state15_17DI$State
+
+state15_17DI
+
+state15_17DI$pop<-as.numeric(as.character(state15_17DI$Population))
+
+state15_17DI$relFlag<-if (state15_17DI$Age.Adjusted.Rate=='Unreliable') {'U'} else {'R'}
+
+state15_17DI$AARate<-(as.numeric(as.character(state15_17DI$Age.Adjusted.Rate.Lower.95..Confidence.Interval))+as.numeric(as.character(state15_17DI$Age.Adjusted.Rate.Upper.95..Confidence.Interval)))/2
+
+arrange(state15_17DI, state)
+
+state15_17DI$group1<-"US States"
+
+state15_17WMDI<-filter(state15_17DI, Race=='White'&Gender=='Male'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17WMDI$prod<-state15_17WMDI$AARate*state15_17WMDI$pop
+
+state15_17WMDI1<-select(state15_17WMDI,prod,pop,state,Drug.Alcohol.Induced)
+
+state15_17WMDI1<-aggregate(.~state+Drug.Alcohol.Induced, data=state15_17WMDI1, FUN=sum)
+
+state15_17WMDI1$AARate1<-state15_17WMDI1$prod/state15_17WMDI1$pop
+
+state15_17WMDI2<-select(state15_17WMDI1,state,Drug.Alcohol.Induced,AARate1)%>%spread(Drug.Alcohol.Induced,AARate1)
+
+colnames(state15_17WMDI2)<-c('state','Alcohol','Other','Drug')
+
+state15_17WMM<-merge(state15_17WM1,state15_17WMDI2,by='state')
+
+state15_17WMC<-select(state15_17WMM,AARate, Alcohol, Other, Drug)
+
+state15_17WMM
+
+cor(state15_17WMC)
+
+state15_17WFDI<-filter(state15_17DI, Race=='White'&Gender=='Female'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17WFDI$prod<-state15_17WFDI$AARate*state15_17WFDI$pop
+
+state15_17WFDI1<-select(state15_17WFDI,prod,pop,state,Drug.Alcohol.Induced)
+
+state15_17WFDI1<-aggregate(.~state+Drug.Alcohol.Induced, data=state15_17WFDI1, FUN=sum)
+
+state15_17WFDI1$AARate1<-state15_17WFDI1$prod/state15_17WFDI1$pop
+
+state15_17WFDI2<-select(state15_17WFDI1,state,Drug.Alcohol.Induced,AARate1)%>%spread(Drug.Alcohol.Induced,AARate1)
+
+colnames(state15_17WFDI2)<-c('state','Alcohol','Other','Drug')
+
+state15_17WFM<-merge(state15_17WF1,state15_17WFDI2,by='state')
+
+state15_17WFC<-select(state15_17WFM,AARate, Alcohol, Other, Drug)
+
+state15_17WFM
+
+cor(state15_17WFC)
+
+state15_17BMDI<-filter(state15_17DI, Race=='Black or African American'&Gender=='Male'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17BMDI
+state15_17BMDI$prod<-state15_17BMDI$AARate*state15_17BMDI$pop
+
+state15_17BMDI1<-select(state15_17BMDI,prod,pop,state,Drug.Alcohol.Induced)
+
+state15_17BMDI1<-aggregate(.~state+Drug.Alcohol.Induced, data=state15_17BMDI1, FUN=sum)
+
+state15_17BMDI1$AARate1<-state15_17BMDI1$prod/state15_17BMDI1$pop
+
+state15_17BMDI2<-select(state15_17BMDI1,state,Drug.Alcohol.Induced,AARate1)%>%spread(Drug.Alcohol.Induced,AARate1)
+
+colnames(state15_17BMDI2)<-c('state','Alcohol','Other','Drug')
+
+state15_17BMDI2<-filter(state15_17BMDI2,!is.na(Alcohol)&!is.na(Drug))
+
+state15_17BMM<-merge(state15_17BM1,state15_17BMDI2,by='state')
+
+state15_17BMC<-select(state15_17BMM,AARate, Alcohol, Other, Drug)
+
+state15_17BMM
+
+cor(state15_17BMC)
+
+state15_17BFDI<-filter(state15_17DI, Race=='Black or African American'&Gender=='Female'&Hispanic.Origin=='Not Hispanic or Latino')
+
+state15_17BFDI$prod<-state15_17BFDI$AARate*state15_17BFDI$pop
+
+state15_17BFDI1<-select(state15_17BFDI,prod,pop,state,Drug.Alcohol.Induced)
+
+state15_17BFDI1<-aggregate(.~state+Drug.Alcohol.Induced, data=state15_17BFDI1, FUN=sum)
+
+state15_17BFDI1$AARate1<-state15_17BFDI1$prod/state15_17BFDI1$pop
+
+state15_17BFDI2<-select(state15_17BFDI1,state,Drug.Alcohol.Induced,AARate1)%>%spread(Drug.Alcohol.Induced,AARate1)
+
+colnames(state15_17BFDI2)<-c('state','Alcohol','Other','Drug')
+
+state15_17BMDI2<-filter(state15_17BMDI2,!is.na(Alcohol)&!is.na(Drug))
+
+state15_17BFM<-merge(state15_17BF1,state15_17BFDI2,by='state')
+
+state15_17BFC<-select(state15_17BFM,AARate, Alcohol, Other, Drug)
+
+state15_17BFM
+
+cor(state15_17BFC)
+
+state15_17HMDI<-filter(state15_17DI, Gender=='Male'&Hispanic.Origin=='Hispanic or Latino')
+
+state15_17HMDI
+
+state15_17HMDI$prod<-state15_17HMDI$AARate*state15_17HMDI$pop
+
+state15_17HMDI1<-select(state15_17HMDI,prod,pop,state,Drug.Alcohol.Induced)
+
+state15_17HMDI1<-aggregate(.~state+Drug.Alcohol.Induced, data=state15_17HMDI1, FUN=sum)
+
+state15_17HMDI1$AARate1<-state15_17HMDI1$prod/state15_17HMDI1$pop
+
+state15_17HMDI2<-select(state15_17HMDI1,state,Drug.Alcohol.Induced,AARate1)%>%spread(Drug.Alcohol.Induced,AARate1)
+
+colnames(state15_17HMDI2)<-c('state','Alcohol','Other','Drug')
+
+state15_17HMDI2<-filter(state15_17HMDI2,!is.na(Alcohol)&!is.na(Drug))
+
+state15_17HMM<-merge(state15_17HM1,state15_17HMDI2,by='state')
+
+state15_17HMC<-select(state15_17HMM,AARate, Alcohol, Other, Drug)
+
+state15_17HMM
+
+cor(state15_17HMC)
+
+state15_17HFDI<-filter(state15_17DI, Gender=='Female'&Hispanic.Origin=='Hispanic or Latino')
+
+state15_17HFDI$prod<-state15_17HFDI$AARate*state15_17HFDI$pop
+
+state15_17HFDI1<-select(state15_17HFDI,prod,pop,state,Drug.Alcohol.Induced)
+
+state15_17HFDI1<-aggregate(.~state+Drug.Alcohol.Induced, data=state15_17HFDI1, FUN=sum)
+
+state15_17HFDI1$AARate1<-state15_17HFDI1$prod/state15_17HFDI1$pop
+
+state15_17HFDI2<-select(state15_17HFDI1,state,Drug.Alcohol.Induced,AARate1)%>%spread(Drug.Alcohol.Induced,AARate1)
+
+colnames(state15_17HFDI2)<-c('state','Alcohol','Other','Drug')
+
+state15_17HMDI2<-filter(state15_17HMDI2,!is.na(Alcohol)&!is.na(Drug))
+
+state15_17HFM<-merge(state15_17HF1,state15_17HFDI2,by='state')
+
+state15_17HFC<-select(state15_17HFM,AARate, Alcohol, Other, Drug)
+
+state15_17HFM
+
+cor(state15_17HFC)
+
+state15_17DI%>%select(state,Race,Hispanic.Origin,Gender, Drug.Alcohol.Induced, AARate)%>%filter(state=='Montana'|state=='District of Columbia')
+
+```
+
+For White Non-Hispanic Male, Alcohol induced causes correlate with r=0.57.
+
+For White Non-Hispanic Female Alcohol induced causes correlate with r=0.65.
+
+For Black Non-Hispanic Male Alcohol induced causes correlate with r=0.43.
+
+For Black Non-Hispanic Female Alcohol induced causes correlate with r=0.51.
+
+For Hispanic Male Alcohol induced causes correlate with r=0.59.
+
+For Hispanic Female Alcohol induced causes correlate with r=NA.
+
+### 2008-2017 Suicide Data For Colorado and Minnesota, Gender, Ethnicity, Metro Status, and ICD10 groups Age 15+ Only (To get closer to SAMHA's age of 18+)
+
+The fourth query was 2008-2017 Suicide Data for Colorado and Minnesota by gender, ethnicity, metro residence, and ICD10 groups. Data was limited to 10 years (2008-2017) and age (15+). Please note that all disease was pulled since suicide was not the main aspect of the given data. I have pulled 10 years to get the most reliable data.
+
+```{r, results='hide',warning=FALSE}
+
+state08_17<-read.table("C:/Final Project/Underlying Cause of Death, 2008-2017 Col Min by ICD.txt", header =TRUE, sep = "\t")
+
+state08_17$state<-state08_17$State
+
+state08_17$pop<-as.numeric(as.factor(state08_17$Population))
+
+state08_17$relFlag<-if (state08_17$Age.Adjusted.Rate=='Unreliable') {'U'} else {'R'}
+
+state08_17$AARate<-(as.numeric(as.character(state08_17$Age.Adjusted.Rate.Lower.95..Confidence.Interval))+as.numeric(as.character(state08_17$Age.Adjusted.Rate.Upper.95..Confidence.Interval)))/2
+
+arrange(state08_17, AARate)
+
+state08_17$group1<-"US States"
+
+state08_17<-select(state08_17,state,Gender,X2013.Urbanization,AARate,Race,pop,relFlag,ICD.10.113.Cause.List)
+
+state08_17M<-filter(state08_17,state=='Minnesota')
+
+state08_17C<-filter(state08_17,state=='Colorado')
+
+```
+
+### 2008-2017 Mortality Data For All States, Gender, Ethnicity, and ICD10 groups Age 15+ Only 
+
+The fifth query was 2008-2017 Mortality Data for all sates by gender, ethnicity, and ICD10 groups. Data was limited to 10 years (2008-2017), ethnicity, and Metro areas. Please note that all disease was pulled since suicide was not only of mention. To get most reliable results data from 10 years ago was used.
+
+```{r, results='hide',}
+
+state08_17a<-read.table("C:/Final Project/Underlying Cause of Death, 2008-2017 Metro Non Hispanic 15+.txt", header =TRUE, sep = "\t")
+
+#state08_17a<-filter(state08_17a,Crude.Rate!='Unreliable')
+
+
+
+state08_17a$state<-state08_17a$State
+
+state08_17a$pop<-as.numeric(as.factor(state08_17a$Population))
+state08_17a$AARate<-(as.numeric(as.character(state08_17a$Age.Adjusted.Rate.Lower.95..Confidence.Interval))+as.numeric(as.character(state08_17a$Age.Adjusted.Rate.Upper.95..Confidence.Interval)))/2
+
+state08_17a$group1<-"US States"
+
+state08_17a<-select(state08_17a,state,Gender,AARate,Race,pop,ICD.10.113.Cause.List)
+
+state08_17b<-spread(state08_17a,ICD.10.113.Cause.List,AARate)
+
+state08_17b
+
+state08_17bMB<-filter(state08_17b,Gender=='Male',Race=='Black or African American')
+
+state08_17bMB
+
+state08_17bMBC<-state08_17bMB[-c(1:5)]
+
+state08_17bMBC<-state08_17bMBC[, -which(colMeans(is.na(state08_17bMBC)) > 0.25)]
+
+state08_17bMBC
+
+colnames(state08_17bMBC)[13] <- "Suicide"
+
+state08_17bMBC<-filter(state08_17bMBC,!is.na(Suicide))
+
+cor(as.matrix(state08_17bMBC[,13]), as.matrix(state08_17bMBC[,-13]), use = "pairwise.complete.obs")
+
+state08_17bMW<-filter(state08_17b,Gender=='Male',Race=='White')
+
+state08_17bMW
+
+state08_17bMWC<-state08_17bMW[-c(1:5)]
+
+state08_17bMWC<-state08_17bMWC[, -which(colMeans(is.na(state08_17bMWC)) > 0.1)]
+
+state08_17bMWC
+
+colnames(state08_17bMWC)[19] <- "Suicide"
+
+state08_17bMBC<-filter(state08_17bMWC,!is.na(Suicide))
+
+cor(as.matrix(state08_17bMWC[,19]), as.matrix(state08_17bMWC[,-11]), use = "pairwise.complete.obs")
+
+```
+
+
+### 2017 Suicide Data For DC and Montana by State, Ethnicity 
+
+The 6th query was 2017 Suicide Data for DC and Montana by ethnicity and ICD10 groups. Data was limited to 2017 and DC and Montana only.
+
+```{r, results='hide',}
+
+state17_DC_Mo<-read.table("C:/Final Project/Underlying Cause of Death, 2017 Monata vs DC.txt", header =TRUE, sep = "\t")
+
+```
+
+
+##SAMHA State Prevalance of Drug and Alcohol Use and Mental Issues.
+
+This data does not provide suicide rates; however, it does provide statistics on alcohol, drug, and mental health by state. It should help us understand which states have issues with substance abuse and mental health. The data is provided in Excel format. I have loaded the file on my GitHub account[@github]. The file has multiple tabs. We do not need all of them, so we will only load the ones we need:
+
+1) Drug use, any drug
+2) Drug use, not marijuana
+3) Drug use, heroin
+4) Alcohol use
+5) Alcohol use, binge
+6) Drug Abuse disorder
+7) Pain Reliever Abuse disorder
+8) Alcohol Abuse disorder
+9) Substance Abuse disorder
+10) Serious Mental Disorder
+11) Any Mental Disorder
+12) Serious Thoughts of Suicide, the most important table for us. Please note that this is not a suicide rate. However, we will work with model that:
+
+Suicide thought->Suicide Planning->Suicide Attempt->Suicide(in case of successful attempt)
+
+###Data Load
+
+```{r, results='hide', tidy=TRUE}
+
+drug_use <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 1")
+
+drug_use<-drug_use[6:62,]
+
+colnames(drug_use)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+drug_uset<-transform(drug_use, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+drug_uset%>%arrange(desc(Y12P))
+
+```
+
+
+```{r, results='hide'}
+
+
+drug_use1 <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 6")
+
+drug_use1<-drug_use1[6:62,]
+
+colnames(drug_use1)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+drug_uset1<-transform(drug_use1,Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+drug_uset1%>%arrange(desc(Y12P))
+
+```
+
+```{r, results='hide'}
+
+
+drug_useh <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 9")
+
+drug_useh<-drug_useh[6:62,]
+
+colnames(drug_useh)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+drug_useth<-transform(drug_useh, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+drug_useth%>%arrange(desc(Y12P))
+
+```
+
+
+```{r, results='hide'}
+
+alc_use <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 13")
+
+alc_use<-alc_use[6:62,]
+
+colnames(alc_use)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+alc_uset<-transform(alc_use,  Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+alc_uset%>%arrange(desc(Y12P))
+
+```
+
+```{r, results='hide'}
+
+
+alc_useb <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 14")
+
+alc_useb<-alc_useb[6:62,]
+
+colnames(alc_useb)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+alc_usebt<-transform(alc_useb, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+alc_usebt%>%arrange(desc(Y12P))
+
+```
+
+```{r, results='hide', message=FALSE, warning=FALSE, }
+
+drug_d <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 20")
+
+drug_d<-drug_d[6:62,]
+
+colnames(drug_d)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+drug_dt<-transform(drug_d, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+drug_dt%>%arrange(desc(Y12P))
+
+```
+
+
+```{r, results='hide', warning=FALSE, }
+
+pain_d <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 21")
+
+pain_d<-pain_d[6:62,]
+
+colnames(pain_d)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+pain_dt<-transform(pain_d, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25), Y26P = as.numeric(Y26P))
+
+pain_dt%>%arrange(desc(Y12P))
+
+```
+
+
+```{r, results='hide'}
+
+alc_d <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 22")
+
+alc_d<-alc_d[6:62,]
+
+colnames(alc_d)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+alc_dt<-transform(alc_d, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25))
+
+alc_dt%>%arrange(desc(Y12P))
+
+```
+
+
+```{r, results='hide', warning=FALSE, }
+
+sa_d <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 23")
+
+sa_d<-sa_d[6:62,]
+
+colnames(sa_d)<-c("Index","state","Y12P","Y12P_LE","Y12P_HE","Y12_17","Y12_17_LE","Y12_17_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE","Y18P","Y18P_LE","Y18P_HE")
+
+sa_dt<-transform(sa_d, Y12P = as.numeric(Y12P),Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25))
+
+sa_dt%>%arrange(desc(Y12P))
+
+```
+
+
+```{r, results='hide'}
+
+mh_d <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 27")
+
+mh_d<-mh_d[6:62,]
+
+colnames(mh_d)<-c("Index","state","Y18P","Y18P_LE","Y18P_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE")
+
+mh_dt<-transform(mh_d, Y18P = as.numeric(Y18P))
+
+mh_dt%>%arrange(desc(Y18P))
+
+```
+
+
+```{r, results='hide'}
+
+amh_d <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 28")
+
+amh_d<-amh_d[6:62,]
+
+colnames(amh_d)<-c("Index","state","Y18P","Y18P_LE","Y18P_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE")
+
+amh_dt<-transform(amh_d, Y18P = as.numeric(Y18P))
+
+amh_dt%>%arrange(desc(Y18P))
+
+```
+
+<br><br>
+
+###Serious thoughts of suicide, rate among 18+ cohort
+
+<br><br>
+
+```{r, results='hide'}
+
+suicide_t <- read_excel("C:/Final Project/NSDUHsaeExcelTabs2017.xlsx", sheet = "Table 30")
+
+suicide_t<-suicide_t[6:62,]
+
+colnames(suicide_t)<-c("Index","state","Y18P","Y18P_LE","Y18P_HE","Y18_25","Y18_25_LE","Y18_25_HE","Y26P","Y26P_LE","Y26P_HE")
+
+suicide_t%>%filter(!is.na(Index))%>%filter(!state %in% c('Total U.S.','Midwest','West','South','Northeast'))
+
+suicide_tt<-transform(suicide_t, Y18P = as.numeric(Y18P),Y18_25 = as.numeric(Y18_25),Y26P = as.numeric(Y26P))
+
+suicide_tt1<-filter(suicide_tt,!is.na(Y18P)&substr(suicide_tt$state,1,3)!='Tot')%>%arrange(desc(Y18P))
+
+arrange(suicide_tt1,desc(Y18P))
+
+suicide_tt1$group1<-"US States"
+
+```
+
+```{r}
+
+par(ps = 10, cex = 1, cex.main = 1)
+
+boxplot(suicide_tt1$Y18P*100)
+
+title(main="Plot 10. Boxplot. Serious thoughts of suicide, % rate among 18+ cohort")
+
+ggplot(suicide_tt1, aes(x=group1, y=Y18P*100))+geom_violin()+ggtitle("Plot 11. Violin plot. Serious thoughts of suicide, % rate among 18+ cohort")+theme(plot.title = element_text(size=13))
+
+plot_usmap(data = suicide_tt1, values = "Y18P", theme = theme_map(), labels = TRUE, label_color = "white", lines = "red")+ 
+  labs(title = "Plot 12. Serious thoughts of suicide, % rate among 18+ cohort")
+
+```
+
+####Discussion of the table:
+
+Utah has the highest % of population with thoughts of suicide, NJ had the lowest. Utah seems to be an outline. Interestingly, Utah has high but not highest rate of suicide among US states. Alaska and Montana have higher rates.
+
+<br><br>
+
+####Serious thoughts of suicide, rate among younger cohort, 18-25
+
+Among young people, Alaska is slightly ahead of Utah in suicide thoughts. Apparently, Utah has teen suicide crisis[@religionnews]. 
+
+```{r, results='hide'}
+
+suicide_tt1%>%arrange(desc(Y18_25))
+
+```
+
+```{r}
+
+par(ps = 10, cex = 1, cex.main = 1)
+
+boxplot(suicide_tt1$Y18_25*100)
+
+title(main="Plot 13. Boxplot. Serious thoughts of suicide, % rate among 18-25 year old cohort")
+
+ggplot(suicide_tt1, aes(x=group1, y=Y18_25*100)) +geom_violin()+ggtitle("Plot 14. Serious thoughts of suicide, % rate among 18-25 year old cohort")+theme(plot.title = element_text(size=10))
+
+plot_usmap(data = suicide_tt1, values = "Y18_25", theme = theme_map(), labels = TRUE, label_color = "white", lines = "red")+ 
+  labs(title = "Plot 15. Serious thoughts of suicide, % rate among 18-25 year old cohort")
+
+```
+<br><br>
+
+###Serious thoughts of suicide, rate among older cohort, 26+
+
+Both Alaska and Utah seem to be outliers. Among older people (26+), Idaho, state adjutant to Utah, has the highest number with suicide thoughts, while NJ again has the lowest number.
+
+```{r, results='hide'}
+
+suicide_tt1%>%arrange(desc(Y26P))
+
+```
+
+```{r}
+
+par(ps = 10, cex = 1, cex.main = 1)
+
+boxplot(suicide_tt1$Y26P*100)
+
+title(main="Plot 16. Serious thoughts of suicide, rate among 25+ year old cohort")
+
+ggplot(suicide_tt1, aes(x=group1, y=Y26P*100))+geom_violin()+ggtitle("Plot 17. Serious thoughts of suicide, % rate among 25+ year old cohort")+theme(plot.title = element_text(size=10))
+
+plot_usmap(data = suicide_tt1, values = "Y26P", theme = theme_map(), labels = TRUE, label_color = "white", lines = "red")+ 
+  labs(title = "Plot 18. Serious thoughts of suicide, % rate among 25+ year old cohort")
+
+```
+
+###SAMHA Master Table
+
+Let's put a SAMHA master table to include all separate pieces together
+
+1) Drug use, any drug 
+2) Drug use, not marijuana 
+3) Drug use, heroin 
+4) Alcohol use 
+5) Alcohol use, binge 
+6) Drug Abuse disorder 
+7) Pain Reliever Abuse disorder 
+8) Alcohol Abuse disorder 
+9) Substance Abuse disorder 
+10) Serious Mental Disorder 
+11) Any Mental Disorder
+12) Serious Thoughts of Suicide 
+
+```{r}
+
+drug_usetA<-select(drug_uset,"state","Y18P")
+
+colnames(drug_usetA)<-c("state","DrugAny")
+
+drug_uset1A<-select(drug_uset1,"state","Y18P")
+
+colnames(drug_uset1A)<-c("state","DrugNoM")
+
+drug_useth1<-select(drug_useth,"state","Y18P")
+
+colnames(drug_useth1)<-c("state","Heroin")
+
+alc_uset1<-select(alc_uset,"state","Y18P")
+
+colnames(alc_uset1)<-c("state","AlcUse")
+
+alc_usebt1<-select(alc_usebt,"state","Y18P")
+
+colnames(alc_usebt1)<-c("state","Binge")
+
+drug_dt1<-select(drug_dt,"state","Y18P")
+
+colnames(drug_dt1)<-c("state","DrugDis")
+
+pain_dt1<-select(pain_dt,"state","Y18P")
+
+colnames(pain_dt1)<-c("state","Painkillers")
+
+alc_dt1<-select(alc_dt,"state","Y18P")
+
+colnames(alc_dt1)<-c("state","AlcDis")
+
+sa_dt1<-select(sa_dt,"state","Y18P")
+
+colnames(sa_dt1)<-c("state","SubAbuse")
+
+suicide_tt2<-select(suicide_tt1,"state","Y18P")
+
+colnames(suicide_tt2)<-c("state","ThoughtSuic")
+
+mh_dt1<-select(mh_dt,"state","Y18P")
+
+colnames(mh_dt1)<-c("state","SerMH")
+
+
+SAMHA_master<-Reduce(function(x,y) merge(x = x, y = y, by = "state"), list(suicide_tt2, mh_dt1, pain_dt1, drug_uset1A, drug_usetA, alc_usebt1,drug_dt1, alc_dt1, alc_uset1, drug_useth1, sa_dt1))
+
+SAMHA_master<-SAMHA_master%>%filter(!state %in% c('Total U.S.','Midwest','West','South','Northeast'))
+
+```
+
+##2016 Suicide Rate by Country
+
+```{r}
+
+wikiURL<-"https://en.wikipedia.org/wiki/List_of_countries_by_suicide_rate"
+
+wikiData <- getURL(wikiURL)
+
+countries <- readHTMLTable(wikiData)
+
+countries1<-countries[[3]]
+
+countries2<-countries1[-1,]
+
+colnames(countries2)<-c("Rank","Country", "AgeAdjRateT","a","b","c","d","e")
+
+countries2$temp<-as.character(countries2$AgeAdjRateT)
+
+countries2$AgeAdjRate<-as.numeric(countries2$temp)
+
+countries2<-countries2%>%select("Rank","Country","AgeAdjRate")
+
+countries2$Country<-gsub("\\(more info\\)", "", as.character(countries2$Country))
+
+head(countries2)%>%
+  kable() %>%
+  kable_styling()
+
+```
+
+# Analysis
+
+Correlation classification[@correlation]:
+
+0 < |r| < .3 weak correlation
+.3 < |r| < .7 moderate correlation
+|r| > 0.7 strong correlation
+
+##CDC Wonder Data.
+
+###2017 State Suicide Rate.
+
+Let's check for normality. The distribution of our data does somewhat resemble to normal. Montana creates a long tail.
+
+```{r}
+
+ggdensity(state2017$AARate, 
+          main = "Plot 19. Density plot of 2017 Age Adj Suicide Rate per 100,000 by State",
+          xlab = "States")
+```
+<br><br>
+
+#### US States vs World Countries: Suicide Rate
+
+Next let's merge US State data into Wiki Country data to see how US States would rank if they were independent countries.
+
+<br><br>
+
+```{r}
+
+stateWiki<-select(state2017,State,AARate)
+
+colnames(stateWiki)<-c("Country","AgeAdjRate")
+
+stateWiki$USflag<-"Y"
+
+countries3<-select(countries2,Country, AgeAdjRate)
+
+countries3$USflag<-"N"
+
+countryState <- rbind(countries3, stateWiki)
+
+countryState<-arrange(countryState,desc(AgeAdjRate))
+
+countryState$rank <- NA
+
+countryState$rank<- 1:nrow(countryState)
+
+countryState<-select(countryState,rank, Country, USflag, AgeAdjRate)
+
+countryState %>%
+  kable() %>%
+  kable_styling()
+```
+
+It is shocking, but 5 US states made in top 10. Montana has the 2nd highers suicide rate. 3 states are ahead of Russia, and Russia has very high suicide rate.
+
+Let's create a violin plot of the distribution.
+
+```{r}
+
+p <- ggplot(countryState, aes(factor(USflag), AgeAdjRate))
+
+p + geom_violin()+ggtitle("Plot 20. Age Adj Suicide Rate per 100,000: World Countries vs US States")+theme(plot.title = element_text(size=10))
+
+```
+
+The plot provides devasting results. US is doing very poorly. Please note that in last 2 decades while US suicide rate was steadily rising, the rest of the world was moving in opposite direction. Rates of suicide across of Asia and Europe have been dropping.
+
+####Suicide Rates vs Serious Thoughts of Suicide by State
+
+Let's merge CDC and SAMHA data to see if there is correlation between suicide rates and serious thoughts of suicide. It should help us to validate our assumption, stated earlier that:
+
+Suicide thought->Suicide Planning->Suicide Attempt->Suicide(in case of successful attempt)
+
+
+
+```{r}
+
+suic_r_t<-merge(state2017, suicide_tt1, by = "state")
+
+cor(suic_r_t$Y18P, suic_r_t$AARate)
+
+#suic_r_t
+
+```
+
+Correlation is moderate. R is only 0.55. Not as high as I expected. 
+
+```{r}
+
+scatterplot(suic_r_t$Y18P*100~suic_r_t$AARate, ylab="Thoughts of suicide, % of population", xlab="Age Adj Suicide Rate per 100,000", 
+            main="Plot 21. Thoughts of Suicide(%) vs Age Adj Suicide Rate per 100,000")
+
+ggplot(suic_r_t, aes(Y18P*100,AARate, color = AARate)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 22. Thoughts of Suicide(%) vs Suicide Rate per 100,000", x="Thoughts of Suicide, %", y="Suicide Rate, per 100,000")
+
+```
+Interesting question is why so many people seriously think about suicide while relativly few commit suicide, while in Montana not that many people seriously think about suicide while so many actually commit it? Is it the way data is collected or is it something else. Later we will see that gun ownership could play a role.
+
+
+####Suicide Rates vs SAMHA Survey.
+
+Let's check correlation between suicide rate and other SAMHA's variables:
+
+Vs Drug Use, Any - no correlation, r=0.00. Very Interesting. It seems variables are perfectly independent.
+
+Vs Heroin Use - practically no correlation, r=-0.04
+
+Vs Alcohol Use and Binge Drinking - week negative correlation(!), r=-0.22 and r=-0.2. Basically what we are seeing that higher alcohol consumption weakly predicts lower suicide rate. Not what I have expected.
+
+Vs Painkillers Abuse - finally we got some decent correlation. r=0.42.
+
+Vs Serious Mental Illness - BINGO! r=0.57. Hard to believe but serious mental illness is a slightly better predictor than serious thoughts of suicide.
+
+
+```{r}
+
+state2017C<-select(state2017,state, AARate)
+
+suic_cor<-merge(state2017C, SAMHA_master, by = "state")
+
+suic_cor1<-suic_cor
+
+suic_cor1$state<-NULL
+
+res <- cor(suic_cor1)
+
+round(res, 2)%>%
+  kable() %>%
+  kable_styling()
+
+```
+
+####Suicide Rates vs Serious Mental Illness Rates by State.
+
+Let's create scatterplots of the 2 variables. We see the same outliers again: Montana, Alaska, and New Mexico, all have high suicide rates, but their rates of mental illness are not all that high.
+
+```{r}
+
+scatterplot(suic_cor$SerMH*100~suic_cor$AARate, xlab="Serious Mental Illness(%)", ylab="Age Adj Suicide Rate per 100,000", 
+            main="Plot 22A. Serious Mental Illness(%) vs Age Adj Suicide Rate, per 100,000")
+
+ggplot(suic_cor, aes(SerMH*100,AARate, color = AARate)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 22B. Serious Mental Illness(%) vs Age Adj Suicide Rate, per 100,000", x="Serious Mental Illness(%)", y="Age Adj Suicide Rate per 100,000")
+
+```
+
+###2017 State Suicide Rate by Gender, Age 15+ Only
+
+We have a chance to compare suicide distribution based on gender.
+
+```{r}
+
+state2017GA$AARate1<-(state2017GA$Age.Adjusted.Rate.Lower.95..Confidence.Interval+state2017GA$Age.Adjusted.Rate.Upper.95..Confidence.Interval)/2
+
+state2017GA1<-filter(state2017GA,Gender!='')
+
+p <- ggplot(state2017GA1, aes(factor(Gender), AARate1))
+
+p + geom_violin()+ggtitle("Plot 23. Violin Plot. Age Adj Suicide Rate per 100,000, 2017 US States: Female vs Males")+theme(plot.title = element_text(size=10))
+
+```
+
+Interesting results. Female distribution has much more narrow range, while male one spreads over wider range.
+
+Let's see how male and female suicide rates correlate.
+
+```{r}
+
+state2017GA2<-state2017GA1%>%select(state,Gender,AARate1)%>%spread(Gender,AARate1)
+
+cor(state2017GA2$Male, state2017GA2$Female)
+
+```
+
+Correlation is almost perfect! R is 0.9. I find the result very important since it appears that the ratio of male to female suicide varies little from state to state. I have seen a lot of inconsistent results and this is the first consistent number. Delaware appears to be the only outlier. Very low female rate and not very low male. Please remember that CDC classified Delaware female rate as unreliable.
+
+```{r}
+
+scatterplot(state2017GA2$Male~state2017GA2$Female, xlab="Male suicide rate, Age Adj per 100,000", ylab="Female suicide rate, Age Adj , per 100,00", main="Plot 24. Male vs Female Suicide Rate, per 100,000")
+
+ggplot(state2017GA2, aes(Male,Female, color = Female)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 25. Male vs Female Suicide Rate, per 100,000", x="Male Suicide Rate, per 100,000", y="Female Suicide Rate, per 100,000")
+
+```
+
+Now let's run Male/Female data vs SAMHA tables to see if we get some meaningful results.
+state2017F
+
+####Male Suicide Rates vs SAMHA Survey
+
+Please remember that SAMHA data is not broken by gender. So, we are forced to compare male population to total. 
+
+Let's check correlation between male suicide rate and other SAMHA's variables:
+
+Interestingly, that r for male suicide rate vs thoughts of suicide has dropped, but not by a lot. r=0.53. Modest correlation.
+
+Vs Drug Use, Any - no correlation, r=-0.003
+
+Vs Heroin Use - practically no correlation, r=-0.02
+
+Vs Alcohol Use, Binge Drinking - week negative correlation(!), r=-0.24 and r=-0.22. Basically what we are seeing that higher alcohol consumption weakly predicts lower suicide rate. Not what I have expected.
+
+Vs Painkillers Abuse - finally we got some decent correlation. r=0.46.
+
+Vs Serious Mental Illness - bingo! r=0.59. Hard to believe but serious mental illness is a better predictor than serious thoughts of suicide.
+
+
+```{r}
+
+state2017MC<-select(state2017M,state, AARate)
+
+suic_r_t_m<-merge(state2017MC, SAMHA_master, by = "state")
+
+suic_r_t_m$state<-NULL
+
+res <- cor(suic_r_t_m)
+
+round(res, 2)%>%
+  kable() %>%
+  kable_styling()
+
+```
+
+####Female Suicide Rates vs SAMHA Survey
+
+Please remember that SAMHA data is not broken by gender. So, we are forced to compare female population to total. 
+
+Let's check correlation between female suicide rate and other SAMHA's variables:
+
+Interestingly, that r for female suicide rate vs thoughts of suicide is the same as for both gender. r=0.57. Modest correlation.
+
+Vs Drug Use, Any - practically no correlation, r=0.11
+
+Vs Heroin Use - practically no correlation, r=-0.04
+
+Vs Alcohol Use and Binge Drinking - week negative correlation, r=-0.19 and r=-0.18. 
+
+Vs Painkillers Abuse - finally we got some modest correlation. r=0.32.
+
+Vs Serious Mental Illness - modest correlation, r=0.52. For females, thoughts of suicide is a slightly better predictor than serious mental illness.
+
+
+```{r}
+
+state2017FC<-select(state2017F,state, AARate1)
+
+suic_corF<-merge(state2017FC, SAMHA_master, by = "state")
+
+suic_corF$state<-NULL
+
+res <- cor(suic_corF)
+
+round(res, 2)%>%
+  kable() %>%
+  kable_styling()
+```
+
+###Study: Colorado vs Minnesota. Where does the difference come from?
+
+Our main research is to understand why such a gap is there. Our collected results should give us final ideas on why we have such a big discrepancy in suicide rates. I have mentioned DC and Montana in the introduction. These 2 states lay on opposite ends of suicide rates; however, comparing these two states is as hard as it gets. Everything is different about them. One is in the Metro area, and another is rural state. Climate is so different, as well as ethnic distribution. Another problem, both states have low population rates. We are facing a typical "apple vs orange" problem. My goal is to find close populations to compare and show if population size plays a significant role in suicide rates. 
+After looking at different factors I decided to compare Colorado and Minnesota. They have comparable population sizes, similar ethic distribution making them both well to do states; however, their suicide rates are significantly different. Minnesota is on the lower end with 13.8 and Colorado is on the higher end with 20.3. Colorado is 47% higher. It does not make any sense to me. Interestingly, later in the project I try to cluster states by SAMHA survey and Minnesota does come out as a state with not a lot of drug, alcohol, and mental health issues, while Colorado falls in mix bag category with some good and some bad indicators. Looking at the details, we can see that Colorado has much higher drug usage than Minnesota. Heroin use is the same for both states (low). Colorado also has higher rate of painkiller abuse, alcohol abuse, suicide thoughts, and mental illness. So, maybe we do have reasons. Let's look at the data.
+
+
+```{r,results='hide'}
+
+col_min<-merge(state15_17C, state15_17M,by=c("Gender","X2013.Urbanization","Race","Hispanic.Origin"))
+
+col_min$ratio<-col_min$AARate.x/col_min$AARate.y
+
+arrange(col_min,desc(ratio))
+
+```
+
+We can see that 3 populations got over twice as high rate in Colorado vs Minnesota. All their rates are considered reliable by CDC.
+
+We will focus on these 3 groups:
+
+1) Non-Hispanic Afro-American males, Large Central Metro
+2) Non-Hispanic White females, Small Metro
+3) Non-Hispanic White males, Small Metro
+
+```{r,results='hide'}
+
+col_min1<-merge(state08_17C, state08_17M,by=c("Gender","X2013.Urbanization","Race","ICD.10.113.Cause.List"))
+
+col_min1$ratio<-col_min1$AARate.x/col_min1$AARate.y
+
+col_min_C1<-filter(col_min1,Gender=='Male',Race=='Black or African American',X2013.Urbanization=='Large Central Metro')
+
+head(arrange(col_min_C1,desc(ratio)))
+
+```
+
+For our first group we can see that Transport accidents and Alcoholic liver disease are very high for Colorado. Let's see if these diseases would correlate for other states. 
+
+```{r,results='hide'}
+
+col_min_C2<-filter(col_min1,Gender=='Male',Race=='White',X2013.Urbanization=='Small Metro')
+
+head(arrange(col_min_C2,desc(ratio)))
+
+```
+
+For our second group we can see that Assault, HIV, and Accidental poisoning are very high for Colorado. Let's see if these diseases would correlate for other states. 
+
+```{r,results='hide'}
+
+col_min_C3<-filter(col_min1,Gender=='Female',Race=='White',X2013.Urbanization=='Small Metro')
+
+arrange(col_min_C3,desc(ratio))
+
+```
+For our third group we can see that Assault, Viral hepatitis, and Accidental poisoning are very high for Colorado. Let's see if these diseases would correlate for other states.
+
+##SAMHA State Prevalaince of Drug and Alcohol Use and Mental Issues Data.
+
+###Younger vs older population with thoughts of suicide
+
+Correlation between younger and older population with thoughts of suicide by state approaching so called strong correlation (r=0.66).
+
+```{r}
+
+
+
+cor(suicide_tt1$Y18_25, suicide_tt1$Y26P)
+
+scatterplot(suicide_tt1$Y18_25*100~suicide_tt1$Y26P,xlab="Age 18-25, %", ylab="Age 26+, %", main="Plot 26. Serious Thoughts of Suicide, rate(%): 18-25 years old vs 26+ years old cohort")
+
+ggplot(suicide_tt1, aes(Y18_25*100,Y26P*100, color = Y18_25)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ ggtitle("Plot 27. Serious thoughts of suicide, rate(%), 18-25 years old vs 26+ years old cohort")+labs(x = "18-25 year old cohort, %", y = "26+ year old cohort, %")
+
+```
+
+###Thoughts of suicide vs Any Mental Illness
+
+Correlation between population with thoughts of suicide and one with any mental illness by state is strong (r=0.74).
+
+```{r}
+
+suic_amh<-merge(suicide_tt1, amh_dt, by = "state")
+
+cor(suic_amh$Y18P.x, suic_amh$Y18P.y)
+
+suic_amh$temp<-suic_amh$Y18P.x*100
+
+suic_amh$temp1<-suic_amh$Y18P.y*100
+
+scatterplot(suic_amh$temp~suic_amh$temp1,xlab="Thoughts of suicide, %", ylab="Any Mental Illness, %", main="Plot 27A. Thoughts of Suicide vs Any Mental Illness, %")
+
+ggplot(suic_amh, aes(temp,temp1, color = Y18P.x)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 27B. Thoughts of Suicide vs Any Mental Illness, %")+labs(x = "18+ year old cohort - Thoughts of suicide, %", y = "18+ year old cohort - Any Mental Illness, %")
+
+```
+
+###Thoughts of suicide vs Serious mental illness
+
+Correlation between population with thoughts of suicide and one with serious mental illness by state is strong (r=0.8).
+
+```{r}
+
+suic_mh<-merge(suicide_tt1, mh_dt, by = "state")
+
+cor(suic_mh$Y18P.x, suic_mh$Y18P.y)
+
+scatterplot(suic_mh$Y18P.x~suic_mh$Y18P.y,xlab="Thoughts of suicide, %", ylab="Serious Mental Illness, %", 
+   main="Plot 28. Thoughts of Suicide vs Serious Mental Illness, %")
+
+ggplot(suic_mh, aes(Y18P.x,Y18P.y, color = Y18P.x)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 29. Thoughts of Suicide vs Serious Mental Illness", x="Thoughts of Suicide", y="Serious Mental Illness")
+
+
+```
+
+###Thoughts of suicide vs Substance Abuse
+
+Correlation between population with thoughts of suicide and one with substance abuse disorder is weak/moderate (r=0.3). Interestingly, Utah has low SA problem, but high level of thoughts of suicide, while DC has drug problem but low level of suicide thoughts. Let's take out these 2 outliers and see if correlation will change. Indeed, correlation improved to r=0.47. Let's see if correlation is stronger for younger cohort. Actually, it is not (r=0.46). Not what I have expected. I would like to mention that throughout my analysis Utah and DC will be somewhat outliers. Specifically, Utah, a state with low violence, drug and alcohol use, while the rate of suicide is one of the highest in country.
+
+```{r}
+
+suic_sa<-merge(suicide_tt1, sa_dt, by = "state")
+
+cor(suic_sa$Y18P.x, suic_sa$Y18P.y)
+
+scatterplot(suic_sa$Y18P.x~suic_sa$Y18P.y,xlab="Thoughts of suicide", ylab="Substance Abuse Illness", 
+   main="Plot 30. Thoughts of Suicide vs SA Illness")
+
+ggplot(suic_sa, aes(Y18P.x,Y18P.y, color = Y18P.x)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 31. Thoughts of Suicide vs SA Illness", y="Substance Abuse Illness", x="Thougts of suicide")
+
+suic_sa_woo<-filter(suic_sa, !state %in% c('Utah','District of Columbia'))
+
+cor(suic_sa_woo$Y18P.x, suic_sa_woo$Y18P.y)
+
+cor(suic_sa_woo$Y18_25.x, suic_sa_woo$Y18_25.y)
+
+```
+
+###Thoughts of suicide vs Alcohol Abuse
+
+Weak correlation, between alcohol and thoughts of suicide (r=0.27). Strange. Without DC and Utah, correlation goes up to 0.43. Correlation is stronger for younger cohort - 0.53. For younger people, Alaska is an outline. Alaska has moderate alcohol issues and a lot of thoughts of suicide.
+
+```{r}
+
+suic_alc<-merge(suicide_tt1, alc_dt, by = "state")
+
+cor(suic_alc$Y18P.x, suic_alc$Y18P.y)
+
+scatterplot(suic_alc$Y18P.x~suic_alc$Y18P.y,xlab="Thoughts of suicide", ylab="Alcohol Disorder", 
+   main="Plot 32. Thoughts of Suicide vs Alcohol Disorder")
+
+ggplot(suic_alc, aes(Y18P.x,Y18P.y,color=Y18P.x)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 33. Thoughts of Suicide vs Alcohol Disorder", y="Alcohol Illness", x="Thougts of suicide", title="Scatterplot")
+
+suic_alc_woo<-filter(suic_alc, !state %in% c('Utah','District of Columbia'))
+
+cor(suic_alc_woo$Y18P.x, suic_alc_woo$Y18P.y)
+
+cor(suic_alc_woo$Y18_25.x, suic_alc_woo$Y18_25.y)
+
+ggplot(suic_alc_woo, aes(Y18_25.x,Y18_25.y, color=Y18_25.x)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 34. Thoughts of Suicide vs Alcohol Disorder - 18-25 years old only", y="Alcohol Illness", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+###Thoughts of suicide vs Painkillers Abuse Disorder
+
+Interestingly, this time neither DC nor Utah are outliers. DC has low painkiller problem and low level of suicide thoughts, while Utah got problems with both. R is moderate 0.46.
+
+```{r}
+
+suic_pain<-merge(suicide_tt1, pain_dt, by = "state")
+
+cor(suic_pain$Y18P.x, suic_pain$Y18P.y)
+
+scatterplot(suic_pain$Y18P.x~suic_pain$Y18P.y,xlab="Thoughts of suicide", ylab="Painkillers Abuse Disorder", 
+   main="Plot 35. Thoughts of Suicide vs Painkillers Abuse Disorder, 18+")
+
+ggplot(suic_pain, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 36. Thoughts of Suicide vs Painkillers Abuse Disorder - 18+ years old", y="Painkillers Abuse Disorder", x="Thougts of suicide", title="Scatterplot")
+
+ggplot(suic_pain, aes(Y18_25.x,Y18_25.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 37. Thoughts of Suicide vs Painkillers Abuse Disorder - 18-25 years old only", y="Painkillers Abuse Disorder", x="Thougts of suicide", title="Scatterplot")
+
+cor(suic_pain$Y18_25.x, suic_pain$Y18_25.y)
+
+ggplot(suic_pain, aes(Y26P.x,Y26P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 38. Thoughts of Suicide vs Painkillers Abuse Disorder - 26+ year old only", y="Painkillers Abuse Disorder", x="Thougts of suicide", title="Scatterplot")
+
+cor(suic_pain$Y26P.x, suic_pain$Y26P.y)
+
+```
+
+###Thoughts of suicide vs Drug Disorder
+
+Similar picture as many other variables, Utah, DC, and Idaho are outliers. DC has low level of suicide thoughts and high level of drug use, while Utah and Idaho are in opposite situation (Utah does have painkiller abuse problem.)
+
+```{r}
+
+suic_drug<-merge(suicide_tt1, drug_dt, by = "state")
+
+cor(suic_drug$Y18P.x, suic_drug$Y18P.y)
+
+scatterplot(suic_drug$Y18P.x~suic_drug$Y18P.y,xlab="Thoughts of suicide", ylab="Drug Disorder", 
+   main="Plot 39. Thoughts of Suicide vs Drug Disorder")
+
+ggplot(suic_drug, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+ 
+  labs(subtitle="Plot 40. Thoughts of Suicide vs Drug Disorder - 18+ year old", y="Drug Abuse Disorder", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+###Thoughts of suicide vs Alcohol Use, Binge Drinking
+
+The first variable that has no correlation at all. Interesting. So, it could be safe to go binge drinking after the project is complete!
+
+```{r}
+
+suic_binge<-merge(suicide_tt1, alc_usebt, by = "state")
+
+cor(suic_binge$Y18P.x, suic_binge$Y18P.y)
+
+scatterplot(suic_binge$Y18P.x~suic_binge$Y18P.y,xlab="Thoughts of suicide", ylab="Binge drinking", 
+   main="Plot 41. Thoughts of Suicide vs Binge drinking")
+
+ggplot(suic_binge, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+
+  labs(subtitle="Plot 42. Thoughts of Suicide vs Binge Drinking - 18+ year old", y="Binge Drinking", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+###Thoughts of suicide vs Alcohol Consumption
+
+No correlation again. Interesting.
+
+```{r}
+
+suic_alcd<-merge(suicide_tt1, alc_uset, by = "state")
+
+cor(suic_alcd$Y18P.x, suic_alcd$Y18P.y)
+
+scatterplot(suic_alcd$Y18P.x~suic_alcd$Y18P.y,xlab="Thoughts of suicide", ylab="Alcohol drinking", 
+   main="Plot 43. Thoughts of Suicide vs Alcohol drinking")
+
+ggplot(suic_alcd, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+
+  labs(subtitle="Plot 44. Thoughts of Suicide vs Alcohol Drinking - 18+ year old", y="Alcohol Drinking", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+###Thoughts of suicide vs Heroin Use
+
+Weak correlation.
+
+```{r}
+
+suic_drugh<-merge(suicide_tt1, drug_useth, by = "state")
+
+cor(suic_drugh$Y18P.x, suic_drugh$Y18P.y)
+
+cor(suic_drugh$Y18_25.x, suic_drugh$Y18_25.y)
+
+scatterplot(suic_drugh$Y18P.x~suic_drugh$Y18P.y,xlab="Thoughts of suicide", ylab="Heroin use", 
+   main="Plot 45. Thoughts of Suicide vs Heroin use")
+
+ggplot(suic_drugh, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+
+  labs(subtitle="Plot 46. Thoughts of Suicide vs Heroin Use - 18+ year old", y="Heroin Use", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+###Thoughts of suicide vs Drug Use, Any
+
+Weak correlation. R=0.24.
+
+```{r}
+
+suic_drugu1<-merge(suicide_tt1, drug_uset1, by = "state")
+
+cor(suic_drugu1$Y18P.x, suic_drugu1$Y18P.y)
+
+cor(suic_drugu1$Y18_25.x, suic_drugu1$Y18_25.y)
+
+scatterplot(suic_drugu1$Y18P.x~suic_drugu1$Y18P.y,xlab="Thoughts of suicide", ylab="Drug use, any", 
+   main="Plot 47. Thoughts of Suicide vs Drug use, any")
+
+ggplot(suic_drugu1, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+
+  labs(subtitle="Plot 48. Thoughts of Suicide vs Drug Use, any - 18+ year old", y="Drug Use, any", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+###Thoughts of suicide vs Drug Use, not Marijuana
+
+The same outliers: DC, Utah, and Idaho. With outliers correlation is 0.31. Without outliers, it goes up to 0.53.
+
+```{r}
+
+suic_drugu<-merge(suicide_tt1, drug_uset, by = "state")
+
+cor(suic_drugu$Y18P.x, suic_drugu$Y18P.y)
+
+cor(suic_drugu$Y18_25.x, suic_drugu$Y18_25.y)
+
+suic_drugu_woo<-filter(suic_drugu, !state %in% c('Utah','Idaho', 'District of Columbia'))
+
+cor(suic_drugu_woo$Y18P.x, suic_drugu_woo$Y18P.y)
+
+scatterplot(suic_drugu$Y18P.x~suic_drugu$Y18P.y,xlab="Thoughts of suicide", ylab="Drug use, not marijuana", 
+   main="Plot 49. Thoughts of Suicide vs Drug use, not marijuana")
+
+ggplot(suic_drugu, aes(Y18P.x,Y18P.y)) + geom_point() + geom_text(aes(label=state), check_overlap = TRUE)+
+  labs(subtitle="Plot 50. Thoughts of Suicide vs Drug Use, not marijuana - 18+ year old", y="Drug Use, not marijuana", x="Thougts of suicide", title="Scatterplot")
+
+```
+
+### Linear regression - "Thoughts of suicide".
+
+Now that we gained insight into mental health and substance abuse drivers behind thoughts of suicide, we can try to build basic Linear Regression. Please note that our main goal is not to model thoughts of suicide; however, it might help us to understand better what drives people to thoughts of suicide and what states are effected the worse.
+
+The model calculates rate of suicide thoughts based on serious mental illness, painkillers abuse rates, and use of any drug.
+
+The adjusted R-squired is 0.72. It is not that great.
+
+```{r}
+
+SAMHA_masterLR<-SAMHA_master
+
+SAMHA_masterLR$Painkillers2<-SAMHA_masterLR$Painkillers**2
+
+SAMHA_masterLR$Painkillers3<-SAMHA_masterLR$Painkillers**3
+
+SAMHA_masterLR$DrugAny2<-SAMHA_masterLR$DrugAny**2
+
+SAMHA_masterLR$DrugAny3<-SAMHA_masterLR$DrugAny**3
+
+model <- lm( ThoughtSuic~ SerMH+Painkillers3+DrugAny+DrugAny2+DrugAny3, data = SAMHA_masterLR)
+
+model
+
+summary(model)
+
+```
+
+####Residual Plot.
+
+```{r}
+
+myres = resid(model)
+
+plot(SAMHA_masterLR$ThoughtSuic, myres, ylab="Residuals", xlab="Thoughts of Suicide", main="Thoughts of Suicide") 
+
+abline(0, 0)      
+
+```
+
+### SAMHA Survey - Clustering.
+
+I will use 4 clusters, which is perfect for me, so I can kind of imitate 4 regions of USA. Let's if clusters correspond to 4 regions.
+
+```{r}
+
+SAMHA_masterC<-SAMHA_master
+
+row.names(SAMHA_masterC)<-SAMHA_masterC[,1]
+
+SAMHA_masterC <- scale(SAMHA_masterC[-1])
+
+wss <- (nrow(SAMHA_masterC)-1)*sum(apply(SAMHA_masterC,2,var))
+
+for (i in 2:15) wss[i] <- sum(kmeans(SAMHA_masterC, 
+  	centers=i)$withinss)
+plot(1:15, wss, type="b", xlab="Number of Clusters",
+  ylab="Within groups sum of squares")
+
+
+fviz_nbclust(SAMHA_masterC, kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+
+# Elbow method
+fviz_nbclust(SAMHA_masterC, kmeans, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method")
+
+fit <- kmeans(SAMHA_masterC, 4) 
+
+aggregate(SAMHA_masterC,by=list(fit$cluster),FUN=mean)
+
+mydata <- data.frame(SAMHA_masterC, fit$cluster)
+
+distance <- get_dist(SAMHA_masterC)
+
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+
+k2 <- kmeans(SAMHA_masterC, centers = 4, nstart = 25)
+
+str(k2)
+
+k2
+
+fviz_cluster(k2, data = SAMHA_masterC)
+
+```
+
+So, we have 4 clusters.
+
+I will name these clusters:
+
+1. "Mix Bag". Good in some areas and bad in another. DC, Alaska, and Montana are a good example. If you remember DC has the lowest suicide rate in the country, but it has drug/alcohol problems. Alaska, on the other hand, has one of the highest suicide rates, but not much of alcohol or drug abuse. Montana has the highest suicide rate. Colorado is among "Mix Bag".
+2. "Golden Middle". These states are in middle. They are not doing bad, but not great either. Many are in Central USA - Iowa, Kansas, Michigan, and North Dakota
+3. "The Best". States that are doing better than average. Many are from East Coast - NJ, NY, NC, FL, GA, VA, and MD. NJ and NY have one of the lowest suicide rates in country. Minnesota is one "The Best".
+4. "Bad". These states got major problems in many areas. Many of them are from Central USA - Utah, Idaho, Oklahoma; and South - Alabama, Mississippi, West Virginia, and so on. Both Utah and Idaho have very high suicide rates.  
+
+As we can see, SAMHA clustering is not very useful indicator of suicide rate. High and low suicide rate states are mixed and not well separated.
+
+## DC vs Montana: Suicide Rates
+
+1. Montana has Native American popualtion with a huge suicide rate. 
+
+2. DC is Large Central Metro Area, while Montana is a mix of Non Metro and Small Metro, which will account for some discrepency. NonMetro/Small Metro vs Large Metro accounts for 25% difference, but not 4 times we see.
+
+If we compare 2 states by type of suicide based on the method. We can see that majority of suicide comited in Montana is done by using firearms, while non-firearm rates for are pretty close. If we compare White non-fireamr rate is 6.9 vs 8.0 - practically indentical. So, it is very likely that avilability of firearms playing a role in driving suicide rates up[@gun].
+
+So to summarize, we can say that 3 top drivers for much higher suicide rate in Montana:
+
+1. Hugely high suicide rate among Native American population in Montana
+2. Rural, isolated envorement in Montana
+3. High gun ownership and corresponding high firearm suicide rate in Montana
+
+```{r}
+
+state15_17<-select(state15_17,state,Race,Hispanic.Origin,Gender,X2013.Urbanization,Population, AARate)%>%filter(state=='Montana'|state=='District of Columbia')
+
+state15_17%>%
+  kable() %>%
+  kable_styling()
+
+state17_DC_Mo<-select(state17_DC_Mo,State,Race,ICD.10.113.Cause.List,Age.Adjusted.Rate)
+
+state17_DC_Mo %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+#Conclusion
+
+I feel that I have tried, but I have not gotten very far.Let me summarize what I was able to identify:
+
+1.	More quality data needs to be collected about suicide. Currently suicide related data is spread and often incomplete. We need more centralized research. I have scanned papers related to statistics of suicide and volume is not all that big. More needs to be done.
+
+2.	Suicide is a complex subject. It is multifaceted. It has roots in social, medical, and biological areas. To view it from only one point would not be enough.
+
+3.	Looking at how USA states fare against World countries is depressing. If USA states were independent countries, they would take 5 out of 10 top positions. In addition, suicide rates fall across the world, while here in US they grow every year.
+
+4.	Contributing factors responsible for a huge variance in suicide levels across the US states are: ethnicity, residential composition (Large Metro vs Rural areas), availability of guns, mental illness rate, alcohol abuse rate, and drug abuse. Alcohol induced deaths correlate from moderately with suicide.
+
+5.	Male and female suicide rates by state strongly correlate, so it is possible that drivers behind suicides for both genders are the same. However, male suicide rates have much more variance to them vs females.
+
+6.	Prevalence of serious thoughts of suicide moderately correlate with suicide. Serious mental illness has moderate correlation with suicide rate as well. Next step would be to try to figure out why rates of mental illness/thoughts of suicide fluctuate that much from state to state. Painkiller Abuse Disorder Prevalence correlates with suicides. Considering that problems with painkiller abuse continue to spread it might negatively effect suicide rate in future.
+
+7.	Attempt to create Linear Model of Serious Thoughts of Suicide was not very successful. R squire was only 0.72. The variables used in a model were Serious Mental Illness, Painkiller Abuse Disorder, and Drug Use, Any Drug. There must be additional variables which need to be discovered.
+
+8.	Clustering states based on SAMHSA survey produced some interesting results. It allowed to cluster states into 4 different groups, however these groups would not correspond to state suicide rates well.
+
+9.	Comparing high suicide state (Colorado) and low suicide state (Minnesota) indicates alcohol, drugs, and violence as possible culprits.
+
+10.	DC vs Montana. 3 drivers - very high suicide rate among Montana Native American population, rural/small metro environment in Montana, and high gun ownership and correspondingly high gun suicide rate in Montana.
+
+
+#Recommendations
+
+1. Create centralized public database for suicide data.
+
+2. Create methods of improved data collection related to suicide.
+
+3. Try to understand how other countries were able to lower their suicide rates. For example, Japan had a lot of success.
+
+4. Do more research into connection between mental illness, alcohol, drugs, violence, gun ownership, and suicide.
+
+5. To see if success of low suicide states could be applied to high suicide states.
+
+6. To do more research into how people go from thinking to actually commuting suicide. 
+
+
+
+#References
